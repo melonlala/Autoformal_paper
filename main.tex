@@ -1,0 +1,672 @@
+
+\documentclass{article}
+\usepackage[final]{neurips}
+\usepackage{graphicx} % Required for inserting images
+\usepackage{natbib}
+\usepackage[utf8]{inputenc} % allow utf-8 input
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+\usepackage{hyperref}       % hyperlinks
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsfonts}       % blackboard math symbols
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+\usepackage{xcolor}         % colors
+\usepackage{ifdraft}
+
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{subcaption}
+\usepackage{enumitem}
+\usepackage{fancyvrb}
+\usepackage{amssymb}
+\usepackage{cleveref}
+\usepackage{tcolorbox}
+\usepackage{newtxtext}
+% \usepackage{libertine} %this is breaking my verbatim.
+\usepackage{soul}
+
+\usepackage{pifont}
+
+\newcommand{\yes}{\ding{51}} % ✓
+\newcommand{\no}{\ding{55}} 
+
+\title{Auto-formalizing Research Mathematics into Verified Lean Proofs}
+\author{Raymond Xu, Yuchen Hou\\
+  {\small \texttt{xu.raym@northeastern.edu, hou.yuchen@northeastern.edu}}}
+\date{July 2026}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+LLM scalability has three dimensions:  training, inference and evaluation. Training scalability concerns efficiently using computation to train larger models; inference scalability concerns allocating test-time computation to improve solutions; and evaluation scalability concerns verifying those solutions with minimal human effort. In software, compilers provide an automatic correctness signal. In mathematics, proof assistants such as Lean can play a similar role by checking whether a solution is formally valid.
+
+However, most mathematical problems and proofs are written in natural language, while formal verification requires expert-written formal statements and proofs. This manual translation creates a major bottleneck. Autoformalization—automatically translating natural-language mathematics into verifiable formal code—is therefore essential for scaling the reliable evaluation of LLM reasoning. 
+
+We study \emph{proof autoformalization}: translating a natural-language theorem
+together with its proof, $(NL_{\text{thm}}, NL_{\text{proof}})$, into a Lean~4
+statement and proof, $(FL_{\text{thm}}, FL_{\text{proof}})$, that the kernel
+accepts and that follows the same argument~\citep{lean4}. Recent systems show
+the task is tractable at competition and undergraduate level: ProofBridge
+translates full theorem-and-proof pairs with joint NL--FL embeddings and
+iterative repair~\citep{proofbridge2025}, and ProofFlow decomposes an informal
+proof into a dependency graph of lemma statements and formalizes each
+node~\citep{proofflow2025}. At research level the numbers stay low: the best
+reported pass rate on RLMEval, built from real Lean blueprint projects, is
+10.3\%~\citep{rlmeval2025}, and open provers solve 3\% of FATE-H and none of
+FATE-X~\citep{fate2025}. We target this gap with three questions: how to ground
+generated code in the actual Mathlib namespace, where structure-guided
+translation fails once grounding is controlled, and how to train small open
+models with a dense and semantically meaningful verifier signal.
+
+Our contributions are: (1) a grounding mechanism that constrains identifier
+decoding to the declaration names of a pinned Mathlib build, removing the
+unknown-identifier failure class at the statement level by construction; (2) a
+preregistered factorial study on research-level benchmarks that separates the
+contributions of structure, retrieval, and grounding, and labels every failure
+into five classes; (3) a per-node reward for reinforcement learning on proof
+translation that combines node compilation, node provability, and node-level
+semantic consistency with the aligned informal step, compared against
+outcome-only and syntactic per-node rewards under matched budgets; and (4) a
+soundness-audited evaluation harness with Comparator statement matching, axiom
+checks, and per-problem cost reporting. Two observations motivate the design.
+
+%We want to build a system that turns a math problem into a verifiable Lean~\citep{lean4}
+%proof that the Lean kernel actually accepts. This happens in two stages:
+%\emph{autoformalization} (natural language $\rightarrow$ Lean statement) and
+%\emph{proof generation} (Lean statement $\rightarrow$ Lean proof). Two
+%observations motivate the project.
+
+\paragraph{Library grounding gates small-model formalization.} At the frontier,
+surface syntax has stopped being the binding constraint: agentic pipelines emit
+almost uniformly parseable Lean, and competition benchmarks are close to
+saturation, with Seed-Prover at 99.6\% on MiniF2F~\citep{seedprover2025} and
+Goedel-Architect closing the full test split with natural-language
+guidance~\citep{goedelarchitect2026}. The constraint that persists across scales
+is grounding in the library and fidelity of the stated claim. A frontier model
+still produces unknown identifiers on roughly half of ProofNet\# items under
+paraphrase~\citep{surfacesens2026}, agentic formalizers reach 89.5\% compilation
+while 60.5\% of outputs are faithful to the source
+statement~\citep{beyondcompilation2026}, and research-level benchmarks remain in
+the single digits~\citep{rlmeval2025, fate2025}. Our own failure analysis in
+Section~\ref{sec:results} shows the same shift for the 7B class we study:
+finetuning repairs surface syntax and moves the dominant failure to hallucinated
+library names. We therefore treat grounding and faithfulness as the quantities
+to improve.
+
+%\paragraph{Formalization ability gates proof ability.} How well a model proves
+%depends on how well it formalizes. This is obvious at stage one, but it also
+%shows up at stage two: proof generators often produce proofs that simply don't
+%compile because they get Lean syntax and library usage wrong. So we treat
+%formalization skill as the main thing to improve, not just a preprocessing step.
+
+\paragraph{Aligned proof pairs exist and are underused.} Reference proofs are
+plentiful in synthetic form, though scarce at research level. Herald
+informalizes Mathlib4 and releases 44k aligned NL--FL proof pairs next to 580k
+statement pairs~\citep{herald2025}, and ProofFlow provides 184 undergraduate
+problems with annotated step dependency graphs~\citep{proofflow2025}. Existing
+pipelines use this material mainly to train statement formalizers. We use the
+proof pairs directly as supervision for translation, restructured into the
+skeleton format of Section~\ref{sec:method}, and we reserve blueprint-project
+alignments~\citep{rlmeval2025} for research-level evaluation, giving the model a
+denser training signal than the compiler's 0/1 reward.
+
+%\paragraph{Ground-truth proofs are scarce.} Most Lean benchmarks give statements
+%but no reference proofs. That leaves the proof generator to learn from a sparse
+%0/1 signal: does it compile, and does the Lean comparator confirm it proves the
+%right theorem. At the same time, lots of proof material exists in natural
+%language and goes unused. We want to use both natural-language proofs as
+%extra supervision, and any available ground-truth values to give the model a
+%denser training signal than the compiler's 0/1 reward.
+
+\section{Related Work}
+{\color{red}
+\paragraph{Statement autoformalization.} LeanEuclid targets Euclidean
+geometry~\citep{leaneuclid2024}. Sampling with type-check filtering and
+Self-BLEU selection reaches 45.1\% on ProofNet\# and 31.6 BEq+ on RLM25 with
+GPT-4o at large budgets~\citep{poiroux2025beq}, and RAutoformalizer adds
+dependency retrieval with a faithfulness-oriented metric, improving BEq@8 from
+12.83\% to 18.18\% on ProofNet~\citep{rautoformalizer2025}. Reinforcement
+learning now leads this subtask: FormaRL lifts Qwen2.5-Coder-7B from 4.04\% to
+26.15\% ProofNet pass@1 with 859 unlabeled examples using a compiler reward and
+an LLM consistency reward~\citep{formarl2025}; Mathesis trains the formalizer
+online with GRPO and prover-preference optimization, introducing the LeanScorer
+semantic metric and the Gaokao-Formal benchmark~\citep{mathesis2025}; CriticLean
+trains the critic itself and releases the 285k-statement
+FineLeanCorpus~\citep{criticlean2025}. Herald builds 580k statement pairs and
+44k proof pairs by informalizing Mathlib4~\citep{herald2025}. Two recent
+analyses shape our design: paraphrase probes find unknown identifiers on about
+half of ProofNet\# items for a strong closed model and name constrained decoding
+over the Mathlib interface as an open direction~\citep{surfacesens2026}, and a
+factorial evaluation of agentic formalization reports a 29-point gap between
+compilation rate and faithfulness~\citep{beyondcompilation2026}.
+
+\paragraph{Proof generation.} ReProver couples retrieval over accessible
+premises with tactic generation~\citep{leandojo2023}. Provers trained with
+reinforcement learning have since saturated competition benchmarks:
+DeepSeek-Prover-V2 trains on subgoal decomposition~\citep{deepseekproverv2},
+Goedel-Prover-V2 adds scaffolded data synthesis and compiler-guided
+self-correction, reaching 88.1\% pass@32 on MiniF2F with a 32B
+model~\citep{goedelproverv2_2025}, Kimina-Prover scales reasoning-style proving
+to 72B~\citep{kimina_prover_2025}, and Seed-Prover reaches 99.6\% on MiniF2F and
+5 of 6 problems at IMO 2025~\citep{seedprover2025}, with its successor at 87.9\%
+on PutnamBench~\citep{seedprover15_2025}. Goedel-Architect organizes proving
+around a blueprint, a dependency graph of definitions and lemmas whose nodes are
+closed in parallel and refined on failure, at a reported cost of \$0.44 per
+problem~\citep{goedelarchitect2026, leanarchitect2026}. The line descends from
+Draft, Sketch, and Prove, which seeded formal sketches with informal
+proofs~\citep{dsp2023}.
+
+\paragraph{Proof-level autoformalization.} Translating the proof itself has two
+recent treatments. ProofBridge trains a joint embedding over NL--FL
+theorem-and-proof pairs, retrieves aligned exemplars, and repairs iteratively
+with type-checker and equivalence feedback, improving semantic correctness by
+31.14 points over Kimina-Prover-RL-1.7B at pass@32 on a curated MiniF2F
+proof-pair split~\citep{proofbridge2025}. ProofFlow maps an informal proof to a
+dependency graph of intermediate lemmas with \texttt{sorry} placeholders and
+reports a ProofScore of 0.545 against 0.123 for monolithic full-proof
+formalization~\citep{proofflow2025}. Both operate at competition and
+undergraduate difficulty. Our work differs in three ways: we ground identifier
+generation in the library by construction, we measure where structure-guided
+translation fails at research level with a labeled failure taxonomy, and we
+train the translator with a per-node semantic reward.
+
+\paragraph{Training signal and evaluation.} Dense verifier feedback for proving
+is established: tactic-level rewards from Lean elaboration with first-error
+credit outperform outcome-only GRPO on MiniF2F and
+ProofNet~\citep{processrl2026}, and FoVer trains process reward models on step
+labels from Z3 and Isabelle~\citep{fover2025}. Semantic rewards exist so far
+only at the statement level~\citep{formarl2025, mathesis2025, criticlean2025}.
+On evaluation, an audit of Lean benchmarks documents specification errors and
+scoring loopholes, showing that kernel acceptance certifies a narrower claim
+than users often assume~\citep{faultsbench2026}; FormalQualBench operationalizes
+specification-based scoring with the Lean FRO Comparator on 23 qualifying-exam
+theorems, where the strongest published harnesses solve 8 and 10
+problems~\citep{formalqualbench2026, opengauss2026, merlean2026}. We adopt this
+standard together with the unbiased pass@$k$ estimator~\citep{chen2021codex}.
+}
+
+% \paragraph{Baselines.} On \emph{statement autoformalization} (NL statement
+% $\rightarrow$ Lean statement), LeanEuclid~\citep{leaneuclid2024} is a baseline in
+% the domain of Euclidean geometry. A separate line of work uses 12-shot prompting
+% with type-check filtering and Self-BLEU selection, generating many candidates
+% and picking one with a heuristic, reaching 45.1\% on ProofNet\# and 31.6 BEq+
+% on RLM25 with GPT-4o, but at large sampling budgets.
+% RAutoformalizer~\citep{rautoformalizer2025} retrieves library dependencies and
+% adds a faithfulness-oriented metric, improving BEq@8 from 12.83\% to 18.18\% on
+% ProofNet, though it requires dependency retrieval over Lean library context.
+% FormaRL~\citep{formarl2025} uses RL from
+% Lean syntax checks plus an LLM semantic-consistency reward, and is data-efficient:
+% with 859 unlabeled examples it lifts Qwen2.5-Coder-7B ProofNet pass@1 from 4.04\%
+% to 26.15\%. On \emph{proof generation} (formal statement $\rightarrow$ Lean
+% proof), LeanDojo's ReProver~\citep{leandojo2023} is a retrieval-augmented prover
+% over accessible premises.
+
+\paragraph{Benchmarks.} Table~\ref{tab:benchmarks} lists the main ones. Two
+things stand out: most pair NL and formal statements but include no reference
+proofs (the sparse-reward setting above), and difficulty ranges from olympiad
+(MiniF2F, PutnamBench) up to graduate and research level (RLMEval, FATE,
+FormalQualBench), where the strongest systems remain far from saturation.
+
+\begin{table}[H]
+  \centering
+  \small
+  \caption{Formal-mathematics benchmarks with the best publicly reported results
+  as of August 2026. Competition-level proving is close to saturation;
+  research-level tracks remain open, which motivates our setting. ``Aligned
+  proofs'' marks benchmarks that ship NL--FL aligned proof material.}
+  \label{tab:benchmarks}
+  \begin{tabular}{@{}p{2.5cm}p{4.2cm}rcp{3.6cm}@{}}
+    \toprule
+    Benchmark & Task & Scale & Aligned proofs & SOTA (Aug.\ 2026) \\
+    \midrule
+    MiniF2F~\citep{minif2f2022} & Competition proving & 244 & \no &
+      99.6\% (Seed-Prover) \\
+    PutnamBench~\citep{putnambench2024} & Competition proving & 660 & \no &
+      87.9\% (Seed-Prover 1.5) \\
+    ProofNet~\citep{proofnet2023} & Undergrad.\ statement autoform. & 371 & \no &
+      45.1\% ProofNet\# (GPT-4o) \\
+    Gaokao-Formal~\citep{mathesis2025} & End-to-end NL proving & 488 & \no &
+      18\% (Mathesis) \\
+    RLMEval~\citep{rlmeval2025} & Research-level proving and proof autoform. &
+      613 & \yes & 10.3\% \\
+    FATE-H / FATE-X~\citep{fate2025} & Graduate+ algebra proving & 100 / 100 &
+      \no & 3\% / 0\% (open provers) \\
+    FormalQualBench~\citep{formalqualbench2026} & PhD-qual.\ theorem development
+      & 23 & \no & 10/23 (MerLean-Prover) \\
+    ProofFlow bench~\citep{proofflow2025} & Proof translation with step DAGs &
+      184 & \yes & ProofScore 0.545 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+
+% \begin{table}[H]
+%   \centering
+%   \small
+%   \caption{Formal-mathematics benchmarks (SOTA as reported by the sources).}
+%   \label{tab:benchmarks}
+%   \begin{tabular}{@{}p{2.1cm}p{4.5cm}rp{3.4cm}@{}}
+%     \toprule
+%     Benchmark & What it measures & Scale & SOTA \\
+%     \midrule
+%     MiniF2F~\citep{minif2f2022} & Formal proving from a Lean statement & 488 &
+%       Goedel-Prover-V2-32B, 88.1\% pass@32 \\
+%     RLMEval~\citep{rlmeval2025} & Research-level proving \& autoformalization &
+%       613 & 10.3\% \\
+%     ProofNet~\citep{proofnet2023} & Undergraduate statement autoformalization &
+%       371 & 45.1\% (GPT-4o) \\
+%     PutnamBench~\citep{putnambench2024} & Competition formal proving & 672 &
+%       DeepSeek-Prover-V2, 49/658 \\
+%     FormalMATH~\citep{formalmath2025} & Formal proving \& test-time scaling &
+%       5{,}560 & DeepSeek-V2-671B, 28.31 \\
+%     FormalQualBench & Graduate-level theorem development & 23 & OpenGauss, 8/23 \\
+%     \bottomrule
+%   \end{tabular}
+% \end{table}
+
+\section{Problem Formulation}
+{\color{red}Given a natural-language pair $(NL_{\text{thm}}, NL_{\text{proof}})$, produce
+$(FL_{\text{thm}}, FL_{\text{proof}})$ such that (i) the Lean kernel accepts
+$FL_{\text{proof}}$ as a proof of $FL_{\text{thm}}$ using only permitted axioms
+and without \texttt{sorry}; (ii) $FL_{\text{thm}}$ matches the intended
+statement under the Comparator; and (iii) $FL_{\text{proof}}$ follows the
+informal argument. To make (iii) measurable, we represent the informal proof as
+a directed acyclic graph $D=(V,E)$ whose nodes are self-contained claims and
+whose edges are dependencies, and we require the formal proof to take the form
+of a \emph{skeleton} $S(D)$: one named lemma per node, closed individually, and
+assembled into the main theorem. Proof faithfulness is the fraction of nodes in
+$V$ with an aligned, kernel-closed counterpart in the final proof.
+
+\paragraph{H1: Identifier grounding by construction.} After supervised
+finetuning, the dominant failure of small formalizers is reference to
+declarations that are absent from Mathlib (34.8\% of failures in our analysis in
+Section~\ref{sec:results}; a frontier model shows about 50\% on ProofNet\# under
+paraphrase~\citep{surfacesens2026}). We hypothesize that restricting decoding at
+identifier positions to a trie over the declaration names of the pinned Mathlib
+build, with retrieval supplying a ranked shortlist, removes this class at the
+statement level by construction and raises Compile@1 and Faithful@1 beyond
+retrieval-only grounding at equal sampling budgets. Refutation condition: gains
+fail to exceed retrieval-only grounding, or forced near-miss names degrade
+faithfulness. Prior work names this direction and leaves it
+open~\citep{surfacesens2026}.
+
+\paragraph{H2: Where structure-guided translation fails at research level.}
+Structure is known to help: informal sketches seed formal proofs
+in~\citet{dsp2023}, subgoal decomposition drives
+DeepSeek-Prover-V2~\citep{deepseekproverv2}, lemma graphs outperform monolithic
+translation in ProofFlow~\citep{proofflow2025}, and blueprint refinement carries
+Goedel-Architect~\citep{goedelarchitect2026}. The open question is where the
+residual failures live once grounding is controlled. We hypothesize that at
+research level the majority of residual failures are node mis-statements, claims
+that are false or unprovable as written, with leaf-closing failures second, and
+that oracle structure contributes a larger marginal gain than oracle retrieval,
+with a positive interaction between the two. Design: the six conditions of
+Table~\ref{tab:factorial} on a pooled set of at least 300 problems from RLMEval,
+FATE-H, and FormalQualBench, with every failure labeled into the five classes of
+Table~\ref{tab:failures}. Refutation condition: leaf-closing failures dominate,
+or retrieval matches structure within confidence intervals.
+
+\paragraph{H3: Per-node semantic rewards for proof translation.} Dense syntactic
+rewards help proving~\citep{processrl2026}, and semantic rewards help statement
+formalization~\citep{formarl2025, mathesis2025, criticlean2025}. Their
+combination for proof translation is untested. We hypothesize that, under
+matched training and rollout budgets, GRPO with a per-node reward combining node
+compilation, node provability by a frozen prover, and node-level semantic
+consistency with the aligned informal step improves Verified@1 and proof
+faithfulness over (a) an outcome-only compiler-and-Comparator reward and (b) a
+per-node syntactic reward without the semantic term. Design: five arms
+(whole-proof SFT, structured SFT, outcome-reward GRPO, per-node syntactic GRPO,
+per-node semantic GRPO) with identical token budgets and identical policy
+initialization. Refutation condition: the semantic term adds nothing over the
+syntactic per-node arm, or the judge is gamed, inflating semantic scores without
+gains in Verified@1.
+
+Pass rates throughout are pass@1 estimated from $n{=}64$ samples per problem
+with the unbiased estimator of~\citet{chen2021codex}, three seeds, and
+stratified bootstrap 95\% confidence intervals; paired conditions are compared
+with McNemar's test, and the per-problem outcome matrix is released.
+
+\begin{table}[h]
+    \centering
+    \caption{Factorial design for H2. Grounding refers to the constrained
+    identifier decoding of H1.}
+    \label{tab:factorial}
+    \small
+    \begin{tabular}{l c c c c c c c}
+        \toprule
+        Condition & Formal stmt & Structure & Retrieval & Grounding &
+          Compile@1 & Faithful@1 & Cost/prob. \\
+        \midrule
+        Direct generation      & \no  & \no  & \no  & \no  & & & \\
+        Statement oracle       & \yes & \no  & \no  & \no  & & & \\
+        Retrieval oracle       & \yes & \no  & \yes & \no  & & & \\
+        Structure oracle       & \yes & \yes & \no  & \no  & & & \\
+        Structure + retrieval  & \yes & \yes & \yes & \no  & & & \\
+        Full (grounded)        & \yes & \yes & \yes & \yes & & & \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\begin{table}[h]
+    \centering
+    \caption{Failure decomposition. Every failed sample receives exactly one
+    label; fractions are per condition.}
+    \label{tab:failures}
+    \small
+    \begin{tabular}{l c c c c c}
+        \toprule
+        Condition & Parse & Unknown ident. & Node mis-stmt & Leaf unsolved &
+          Assembly \\
+        \midrule
+        Direct generation      & & & & & \\
+        Statement oracle       & & & & & \\
+        Retrieval oracle       & & & & & \\
+        Structure oracle       & & & & & \\
+        Structure + retrieval  & & & & & \\
+        Full (grounded)        & & & & & \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+
+}
+% How to translate natural-language mathematical problems and solutions into faithful verifiable statement-and-proof pairs, enabling scalable formal verification?
+
+% Given a natural language theorem and proof pair $(NL_\text{theorem}, NL_\text{proof})$, we want to get the formal statement and proof $(FL_\text{theorem}, FL_\text{proof})$, which is verifiable by Lean and semantic faithful with the natural language pair. 
+
+% \paragraph{Hypothesis 1: Proof-aware autoformalization enables more verified solutions. (confirm motivation)} Autoformalizing both the theorem and the reasoning in a natural-language solution will produce a higher rate of correctly verified solutions than autoformalizing the theorem alone and asking a prover to reconstruct the proof independently.
+% \begin{table}[h]
+%     \centering
+%     \caption{Autoformalization enables more verified solutions}
+%     \label{tab:h1}
+%     \begin{tabular}{c|c c}
+%     \toprule
+%         Method & Pass@3 & Testing time \\
+%         \midrule
+%         statement formalization + formal reasoning & & \\
+%         statement formalization + formal reasoning with NL context & & \\
+%         joint theorem-and-solution autoformalization & & \\
+%         \bottomrule
+%     \end{tabular}
+% \end{table}
+
+% \paragraph{Hypothesis: Proof-structure recovery is the dominant remaining bottleneck (confirm bottleneck)} Given a correct Lean theorem statement, supplying oracle intermediate claims and dependency relations will improve solution's passrate more than supplying oracle library premises alone.
+
+% \begin{table}[h]
+%     \centering
+%     \caption{Locate bottleneck}
+%     \label{tab:h2}
+%     \small
+%     \begin{tabular}{c|c c c c c}
+%         \toprule
+%          Condition& formal statement & intermediate lemma statements & Mathlib declarations & Pass@3 & testing time \\
+%         \midrule
+%          Direct generation & \no & \no  & \no & & \\
+%          Statement oracle&   \yes & \no & \no & & \\
+%          Structure oracle & \yes & \yes& \no & & \\
+%          Retrieval oracle & \yes & \no & \yes & & \\
+%          Combined oracle & \yes & \yes & \yes & & \\
+%          \bottomrule
+%     \end{tabular}
+% \end{table}
+
+% \paragraph{Hypothesis 2: Step-level verifier feedback is more useful than final binary reward (inspire methods)}
+
+Verifier-guided reinforcement learning applied to individual formalized claims
+will improve end-to-end verification more than training from final compilation or proof-validity rewards alone. 
+
+We compare whole-proof supervised
+fine-tuning, structured supervised fine-tuning, final-reward reinforcement
+learning, and step-level verifier-guided reinforcement learning under matched
+training and rollout budgets.
+
+\section{Method}
+{\color{red}\label{sec:method}
+Our pipeline has three stages, followed by training and a verification protocol.
+
+\paragraph{Stage A: parsing and alignment.} A parsing model segments
+$NL_{\text{proof}}$ into claims and dependency edges, restating quantifiers and
+hypotheses so that every node is self-contained. The output is the graph
+$D=(V,E)$. We follow the annotation conventions of ProofFlow's dependency
+graphs~\citep{proofflow2025} and hand-validate a sample of parses per dataset.
+
+\paragraph{Stage B: skeleton emission with grounded decoding.} The formalizer
+emits a single Lean file: the target theorem signature is fixed verbatim, each
+node of $D$ becomes a named lemma ending in \texttt{:= by sorry} with its
+parents declared, and the file must elaborate under the pinned toolchain,
+following the blueprint conventions of~\citet{goedelarchitect2026,
+leanarchitect2026}. Grounding works as follows. We extract the full set of
+declaration names from the pinned Mathlib build once, build a token-level trie
+over them, and whenever the compiler reports an unknown identifier we re-decode
+the offending span with logits masked to trie-valid continuations, placing a
+retrieval-ranked shortlist of candidate declarations in context. The loop
+repeats until the file elaborates or the repair budget is spent. We ablate a
+fully constrained first pass against this repair-only variant; the repair-only
+variant is simpler and already eliminates the failure class.
+
+\paragraph{Stage C: node closing and assembly.} A frozen prover
+(Goedel-Prover-V2-8B~\citep{goedelproverv2_2025}) attempts each node given only
+its declared parents. The assembled proof is audited: Comparator statement
+match, axiom whitelist checked via \texttt{\#print axioms}, a scan for
+\texttt{sorry}, and rejection of \texttt{native\_decide} and top-level
+\texttt{axiom} declarations, following the specification-based standard
+of~\citet{formalqualbench2026} and the audit findings
+of~\citet{faultsbench2026}.
+
+\paragraph{Training.} The policy is the Stage A+B formalizer (7B); the prover
+stays frozen so that improvements attribute to translation. We first run SFT on
+Herald's 44k proof pairs~\citep{herald2025} restructured into skeleton format,
+then GRPO with the reward
+\[
+  r \;=\; w_0\,\mathbf{1}[\text{skeleton elaborates}]
+  \;+\; \frac{1}{|V|}\sum_{v\in V}\Big(a\,\mathbf{1}[v\text{ compiles}]
+  \;+\; b\,\mathbf{1}[v\text{ closed}]
+  \;+\; c\,\mathrm{sem}(v)\Big)
+  \;+\; w_1\,\mathbf{1}[\text{final proof accepted}],
+\]
+where $\mathrm{sem}(v)$ scores the consistency of node $v$ with its aligned
+informal step using a judge validated against 100 human-labeled node pairs
+(agreement reported). Setting $c{=}0$ gives the syntactic arm of H3; collapsing
+to the last term gives the outcome-only arm. Judge scores are capped and audited
+on a held-out set to detect reward hacking.
+
+\paragraph{Verification protocol.} All checking runs \texttt{lake env lean} on a
+pinned Mathlib commit through LeanInteract or the Kimina Lean
+Server~\citep{rlmeval2025, kimina_prover_2025}, with \texttt{maxHeartbeats} and
+wall-clock caps reported. We report per-problem token and dollar costs,
+following~\citet{goedelarchitect2026}.}
+%We use the standard three-part pipeline and close the loop with the verifier:
+% (1) an \textbf{autoformalizer} turns the problem into a Lean statement, (2) a
+% \textbf{proof generator} writes a Lean proof, and (3) an \textbf{evaluator}
+% checks it compiles and is faithful to the target theorem (no unsound tricks).
+% The flow is:
+% \[
+%   \text{\LaTeX{} problem} \rightarrow \text{formulator} \rightarrow
+%   \text{Lean proof} \xrightarrow{\texttt{lake env lean}} \text{validation log}
+%   \rightarrow \text{verified proof},
+% \]
+% where failed candidates go back to the formulator with the compiler error log
+% (and user feedback if needed).
+
+% Following FormaRL~\citep{formarl2025}, the backbone is an RL loop with a compiler
+% reward: $1$ if \texttt{Solution.lean} compiles under \texttt{lake env lean}
+% \emph{and} passes the Lean comparator (the proof matches the theorem using only
+% the permitted axioms), else $0$. To fight sparse reward, we add FormaRL's
+% semantic-consistency reward and supervision mined from natural-language proofs.
+
+\section{Experiment}
+\paragraph{Metrics}
+\begin{enumerate}
+    \item \textbf{Compile@1}: the output is valid Lean that elaborates without
+    errors on the pinned toolchain.
+    \item \textbf{Verified@1}: the kernel accepts the proof, the Comparator
+    confirms it proves the target statement, the axiom audit passes, and no
+    \texttt{sorry} appears.
+    \item \textbf{Statement faithfulness}: agreement of $FL_{\text{thm}}$ with
+    $NL_{\text{thm}}$, scored by a judge validated on 100 human-labeled pairs
+    with Cohen's $\kappa$ reported, following the validation practice
+    of~\citet{beyondcompilation2026, mathesis2025}.
+    \item \textbf{Proof faithfulness}: the fraction of nodes in $D$ with an
+    aligned, kernel-closed counterpart in $FL_{\text{proof}}$.
+\end{enumerate}
+A solution can satisfy Compile@1 and still fail Verified@1, for example through
+a \texttt{sorry}, a disallowed axiom, or a proof of a different statement, so we
+report the metrics separately. All pass rates use the unbiased pass@$k$
+estimator with $n{=}64$ samples~\citep{chen2021codex}, three seeds, and
+stratified bootstrap 95\% confidence intervals.
+
+% \paragraph{Metrics} \begin{enumerate}
+%     \item Compilation success: a rollout counts as a success if it is valid Lean code that compiles without errors.
+%     \item Proof validity: a solution is mathematically correct, meaning it proves the same statement as problem, uses only the allowed axioms, and is accepted by the Lean kernel. 
+%     \item Semantic faithfulness: 
+% \end{enumerate}
+
+% A solution can compile successfully but still fail proof validity, for example if it contains a \texttt{sorry}, uses a disallowed axiom, or proves a different statement than intended. We report both metrics to separate basic code correctness from actual mathematical correctness.
+
+\paragraph{Baselines} Statement-level: FormaRL~\citep{formarl2025} and
+Kimina-Autoformalizer-7B~\citep{kimina_prover_2025}, each followed by the same
+frozen prover. Proof-level: ProofBridge~\citep{proofbridge2025} and
+ProofFlow~\citep{proofflow2025} with their released code at matched sampling
+budgets. Prover-only reference: Goedel-Prover-V2-8B from the formal statement
+alone~\citep{goedelproverv2_2025}. Agent reference: published FormalQualBench
+results for OpenGauss and MerLean-Prover, reported for context and marked as
+obtained under different budgets~\citep{opengauss2026, merlean2026}.
+%\paragraph{Baselines}
+%FormalRL, openGaussian, gordel-prover
+
+\subsection{Results}\label{sec:results}
+\paragraph{Failure Case}
+We finetuned Llama-3-8B on the Kimina-Prover and Goedel-Prover proof
+corpora~\citep{kimina_prover_2025, lin2025goedelprover} to obtain Llama-8B-SFT,
+and compared it against DeepSeek-Prover-V2-7B under its chain-of-thought prompt
+template~\citep{deepseekproverv2}, using the Comparator on
+FormalQualBench~\citep{formalqualbench2026} with a pinned Mathlib commit.
+% TODO: report n samples per problem, seeds, decoding parameters, Mathlib commit.
+Every failed sample receives exactly one label from the taxonomy below, which
+also defines the classes of Table~\ref{tab:failures}:
+%We finetuned Llama-3-8B on~\cite{kimina_prover_2025, lin2025goedelprover} to obtain Llama-8B-SFT, and compared it against the state-of-the-art DeepSeek-%Prover-V2-7B~\cite{deepseekproverv2} using the standard Lean-prover evaluator Comparator on FormalQualBench. We analyze the typical failure modes of both models below:
+\begin{enumerate}
+    \item \textbf{Syntax/parse errors.} The base model fails predominantly (60.2\%) due to outputs that are not valid Lean at all: markdown headers, natural-language explanations, or informal theorem statements (e.g., a stray \texttt{\#\#\#} header or a \texttt{Theorem} line written in prose) leak directly into the \texttt{.lean} file, causing the parser to reject the proof before any semantic checking can occur. After finetuning, this failure mode drops sharply to 11.1\%, indicating that SFT is highly effective at teaching the model to respect Lean's surface syntax and output well-formed code.
+    \item \textbf{Unknown identifiers.} The finetuned model's dominant failure
+    mode shifts to referencing lemmas or definitions that are absent from
+    Mathlib (34.8\%, up from 5.2\% in the base model). The pattern is consistent
+    with the model having learned the style of Mathlib proofs, including
+    plausible naming conventions, without reliable knowledge of the actual
+    library contents. The same class appears at the frontier: a paraphrase probe
+    reports unknown identifiers on about half of ProofNet\# items for a strong
+    closed model~\citep{surfacesens2026}. This observation motivates H1.
+    \item \textbf{Unsolved goals.} Both models leave a comparable fraction of
+    goals unsolved (11.4\% base, 13.2\% SFT), which suggests that search
+    failures respond weakly to finetuning and persist for both models. H2
+    measures how much of this residue reflects mis-stated intermediate claims as
+    opposed to genuine leaf difficulty.
+  %  \item \textbf{Unknown identifiers.} In contrast, the finetuned model's dominant failure mode shifts to referencing lemmas or definitions that do not exist in Mathlib (34.8\%, up from 5.2\% in the base model). We attribute this to the SFT model having learned the \emph{style} of Mathlib-based proofs — plausible-sounding naming conventions, common lemma patterns — without having reliably memorized the actual library contents, leading it to hallucinate identifiers that look correct but are not defined.
+%    \item \textbf{Unsolved goals.} Both models leave a comparable fraction of goals unsolved (11.4\% base vs.\ 13.2\% SFT), suggesting that genuine reasoning/search failures — as opposed to surface-level formatting issues — are only marginally affected by finetuning and remain a persistent bottleneck for both models.
+\end{enumerate}
+
+\paragraph{Ongoing Results}
+FormalQualBench targets agent harnesses built on frontier models, where the
+strongest published systems solve 10 of 23 problems~\citep{merlean2026};
+end-to-end scores for the 7B class are therefore near zero and carry little
+signal. We instead evaluate the effect of post-training stage by stage, on
+statement formalization and on proving, across MiniF2F, ProofNet, and
+FormalQualBench, whose difficulty increases in that order.
+Table~\ref{tab:main} reports Compile@1 and Verified@1 for each cell.
+
+\paragraph{Protocol note on finetuning RL-trained provers.}
+DeepSeek-Prover-V2-7B ships as a reinforcement-learned checkpoint with distinct
+chain-of-thought and non-chain-of-thought prompt modes~\citep{deepseekproverv2}.
+In a preliminary run, supervised finetuning on top of this checkpoint reduced
+MiniF2F accuracy from 70\% to 40\% at pass@8. Two effects explain drops of this
+kind: a template mismatch that suppresses the model's chain-of-thought mode, and
+the tendency of supervised finetuning to overwrite behavior acquired through
+reinforcement learning~\citep{chu2025sft}. Our protocol therefore first
+reproduces the published base numbers under the model's own template, applies
+finetuning to base or instruct checkpoints, and reports the exact template,
+decoding parameters, and Mathlib commit for every cell.
+
+\begin{table}[h!]
+    \centering
+    \small
+    \caption{Post-training influence on formalization and proving. Each cell
+    reports Compile@1 (Verified@1) with 95\% bootstrap intervals. SFT rows start
+    from base or instruct checkpoints; see the protocol note.}
+    \begin{tabular}{l c c c}
+        \toprule
+        Model & MiniF2F & ProofNet & FormalQualBench \\
+        \midrule
+         Llama-3-8B & & & \\
+         Llama-3-8B-SFT & & & \\
+         Llama-3-8B-GRPO & & & \\
+         DeepSeek-Prover-V2-7B (CoT) & & & \\
+         DeepSeek-Prover-V2-7B-SFT & & & \\
+         DeepSeek-Prover-V2-7B-GRPO & & & \\
+         Kimina-Autoformalizer-7B & & & \\
+         Goedel-Prover-V2-8B & & & \\
+        \bottomrule
+    \end{tabular}
+    \label{tab:main}
+\end{table}
+\begin{figure}[h!]
+    \centering
+    \fbox{\rule{0pt}{4cm}\rule{0.45\linewidth}{0pt}}\hfill
+    \fbox{\rule{0pt}{4cm}\rule{0.45\linewidth}{0pt}}
+    \caption{Planned figure. Left: Compile@1 and Faithful@1 for the six
+    conditions of Table~\ref{tab:factorial} with 95\% bootstrap intervals.
+    Right: failure-class composition per condition as stacked bars, using the
+    taxonomy of Table~\ref{tab:failures}.}
+    \label{fig:factorial}
+\end{figure}
+
+% Since FormalQualBench is too complex for current models to complete the end-to-end math-proving task, we instead separately evaluate the influence of post-training on the base model's formalization and proving abilities. Specifically, we evaluate problem formalization ability on MiniF2F, ProofNet, and FormalQualBench, whose difficulty increases in that order.
+
+% Table~\ref{tab:main} reports these results.
+
+% \begin{table}[h!]
+%     \centering
+%     \caption{Post-training influence on formalization ability}
+%     \begin{tabular}{c c c c}
+%         \toprule
+%         Model & MiniF2F & ProofNet & FormalQualBench\\
+%         \midrule
+%          Llama-3-8B & & & \\
+%          Llama-3-8B-SFT & & & \\
+%          Llama-3-8B-GRPO & & & \\
+%          DeepSeek-Prover-V2-7B & & & \\
+%          DeepSeek-Prover-V2-7B-SFT & & & \\
+%          DeepSeek-Prover-V2-7B-GRPO & & & \\
+%         \bottomrule
+%     \end{tabular}
+%     \label{tab:main}
+% \end{table}
+
+% \begin{figure}[h!]
+%     \centering
+%     \fbox{\rule{0pt}{4cm}\rule{0.5\linewidth}{0pt}}
+%     \caption{Larger models achieve better performance.}
+%     \label{fig:scale_size}
+% \end{figure}
+\section{Limitations}
+Judge-based faithfulness scores can be gamed, so we validate the judge on human
+labels and audit reward trajectories on a held-out set. The factorial covers
+three factors and holds the prover and prompt format fixed, so interactions with
+prover choice remain unmeasured. Research-level benchmarks are small, which is
+why we pool sets and report intervals in place of single points. Results for 7B
+models may order differently at larger scales.
+
+\section{Reproducibility}
+We release code, the per-problem outcome matrix, prompts, the Mathlib commit,
+decoding parameters, seeds, and per-problem token and dollar costs. Verification
+runs \texttt{lake env lean} with the Comparator, an axiom whitelist checked by
+\texttt{\#print axioms}, a scan for \texttt{sorry}, and rejection of
+\texttt{native\_decide} and top-level \texttt{axiom} declarations.
+
+
+\bibliographystyle{abbrvnat}
+\bibliography{ref}
+
+\end{document}
