@@ -1,41 +1,96 @@
 
-\documentclass{article}
-\usepackage[final]{neurips}
-\usepackage{graphicx} % Required for inserting images
-\usepackage{natbib}
-\usepackage[utf8]{inputenc} % allow utf-8 input
-\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
-\usepackage{hyperref}       % hyperlinks
-\usepackage{url}            % simple URL typesetting
-\usepackage{booktabs}       % professional-quality tables
-\usepackage{amsfonts}       % blackboard math symbols
-\usepackage{nicefrac}       % compact symbols for 1/2, etc.
-\usepackage{microtype}      % microtypography
-\usepackage{xcolor}         % colors
-\usepackage{ifdraft}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\usepackage{amsmath}
-\usepackage{graphicx}
-\usepackage{float}
-\usepackage{subcaption}
-\usepackage{enumitem}
-\usepackage{fancyvrb}
-\usepackage{amssymb}
-\usepackage{cleveref}
-\usepackage{tcolorbox}
-\usepackage{newtxtext}
-% \usepackage{libertine} %this is breaking my verbatim.
-\usepackage{soul}
+%%% LaTeX Template for AAMAS-2027 (based on sigconf.tex)
+%%% Prepared by the AAMAS-2027 Publication Chairs based on the version from AAMAS-2026.
 
-\usepackage{pifont}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\newcommand{\yes}{\ding{51}} % ✓
-\newcommand{\no}{\ding{55}} 
+%%% Start your document with the \documentclass command.
+
+
+%%% == IMPORTANT ==
+%%% Use the first variant below to anonymize your submission (no author information shown).
+%%% Use the second variant below for the final paper (including author information).
+%%% For further information on anonymity and double-blind reviewing,
+%%% please consult the call for paper information
+%%% https://warwick.ac.uk/fac/sci/dcs/aamas2027/calls/
+
+%%%% For anonymized submission, use this
+\documentclass[sigconf,anonymous]{aamas}
+
+%%%% For camera-ready, use this
+%\documentclass[sigconf]{aamas}
+
+
+%%% Load required packages here (note that many are included already).
+
+\usepackage{balance} % for balancing columns on the final page
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%% AAMAS-2027 copyright block (do not change!)
+
+\makeatletter
+\gdef\@copyrightpermission{
+  \begin{minipage}{0.2\columnwidth}
+   \href{https://creativecommons.org/licenses/by/4.0/}{\includegraphics[width=0.90\textwidth]{by}}
+  \end{minipage}\hfill
+  \begin{minipage}{0.8\columnwidth}
+   \href{https://creativecommons.org/licenses/by/4.0/}{This work is licensed under a Creative Commons Attribution International 4.0 License.}
+  \end{minipage}
+  \vspace{5pt}
+}
+\makeatother
+
+\setcopyright{ifaamas}
+\acmConference[AAMAS 2027]{Proc.\@ of the 26th International Conference
+on Autonomous Agents and Multiagent Systems (AAMAS 2027)}{3--7 May 2027}{Hanoi, Vietnam}{M.~Baldoni, F.~Fang, W.~Yeoh, N.~Yorke-Smith (eds.)}
+\copyrightyear{2027}
+\acmYear{2027}
+\acmDOI{}
+%\acmPrice{}
+\acmISBN{}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%% == IMPORTANT ==
+%%% Use this command to specify your OpenReview submission number.
+%%% In anonymous mode, it will be printed on the first page.
+
+\acmSubmissionID{<<OpenReview submission id>>}
+
+%%% Use this command to specify the track you want to submit your paper to.
+
+% \submissionType{Research Paper Track}
+%\submissionType{AAAI Track}
+%\submissionType{Demonstration Track}
+\submissionType{Blue Sky Ideas Track}
+%\submissionType{JAAMAS Track}
+%\submissionType{Doctoral Consortium}
+
+%%% Use this command to specify the title of your paper.
 
 \title{Auto-formalizing Research Mathematics into Verified Lean Proofs}
-\author{Raymond Xu, Yuchen Hou\\
-  {\small \texttt{xu.raym@northeastern.edu, hou.yuchen@northeastern.edu}}}
+\author{Raymond Xu, Yuchen Hou, Mahdi Imani\\
+  {\small \texttt{xu.raym@northeastern.edu, hou.yuchen@northeastern.edu, m.imani@northeastern.edu}}}
 \date{July 2026}
+\begin{abstract}
+Translating natural-language mathematical knowledge into machine-verifiable formal representations remains a fundamental challenge for autonomous reasoning agents. Recent advances in autoformalization increasingly exploit decomposition: complex statements are divided into clauses, informal proofs into intermediate lemmas, and difficult proof goals into recursively solvable subgoals. Yet the conditions under which decomposition genuinely improves knowledge translation remain poorly understood. Decomposition reduces local complexity but can also fragment semantic dependencies, introduce incompatible assumptions, and shift difficulty from translation to aggregation. We argue that the next frontier is not simply deeper decomposition, but structure-aware compositional translation: agents must learn what to decompose, which dependencies to preserve, when to aggregate, and how to verify that the resulting formal representation retains the intended meaning. We outline a research vision connecting hierarchical knowledge representation, multi-agent coordination, and formal verification. We identify structural properties that may determine when decomposition is beneficial, propose interface-aware aggregation as a central research problem, and discuss adaptive architectures that move between local translation and global reasoning. This perspective positions autoformalization as a testbed for a broader question in autonomous multi-agent systems: how can distributed agents transform complex knowledge without losing its global semantics?
+\end{abstract}
+
+%%% Use this command to specify a few keywords describing your work.
+%%% Keywords should be separated by commas.
+
+\keywords{Legends, Myths, Folktales}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%% Include any author-defined commands here.
+\newcommand{\yes}{\ding{51}} % ✓
+\newcommand{\no}{\ding{55}}
+\newcommand{\tbc}{\textcolor{red}{TBC}} % value still to be filled in
+
 
 \begin{document}
 
@@ -44,7 +99,7 @@
 \section{Introduction}
 LLM scalability has three dimensions:  training, inference and evaluation. Training scalability concerns efficiently using computation to train larger models; inference scalability concerns allocating test-time computation to improve solutions; and evaluation scalability concerns verifying those solutions with minimal human effort. In software, compilers provide an automatic correctness signal. In mathematics, proof assistants such as Lean can play a similar role by checking whether a solution is formally valid.
 
-However, most mathematical problems and proofs are written in natural language, while formal verification requires expert-written formal statements and proofs. This manual translation creates a major bottleneck. Autoformalization—automatically translating natural-language mathematics into verifiable formal code—is therefore essential for scaling the reliable evaluation of LLM reasoning. 
+However, most mathematical problems and proofs are written in natural language, while formal verification requires expert-written formal statements and proofs. This manual translation creates a major bottleneck. Autoformalization—automatically translating natural-language mathematics into verifiable formal code—is therefore essential for scaling the reliable evaluation of LLM reasoning.
 
 We study \emph{proof autoformalization}: translating a natural-language theorem
 together with its proof, $(NL_{\text{thm}}, NL_{\text{proof}})$, into a Lean~4
@@ -243,6 +298,58 @@ FormalQualBench), where the strongest systems remain far from saturation.
   \end{tabular}
 \end{table}
 
+\paragraph{Proof datasets.} Table~\ref{tab:dataset-stats} compares our
+structured proof dataset with existing proof formalization datasets. Our
+miniF2F release pairs each kernel-verified proof with a natural-language proof
+and a step dependency graph read off the elaborated proof term; a ProofNet
+release follows.
+
+% Ours (miniF2F) numbers: outputs/minif2f/dataset.test.informal.json.
+% n/r = not reported by the authors; n/a = no formal proofs to measure.
+\begin{table*}[t]
+  \centering
+  \small
+  \caption{Statistics of our structured proof dataset and comparable proof
+  formalization datasets. n/r: not reported; n/a: not applicable (no formal
+  proofs).}
+  \label{tab:dataset-stats}
+  \begin{tabular}{@{}l l r r c c@{}}
+    \toprule
+    Dataset & Language & Size & Avg.\ steps / problem & Proof consistency & GT formal proof \\
+    \midrule
+    Ours (miniF2F-test) & Lean 4 & 162$^{a}$ & 8.96$^{b}$ & 3.00/5$^{c}$ & \yes$^{d}$ \\
+    Ours (ProofNet)     & Lean 4 & \tbc & \tbc & \tbc & \tbc \\
+    \midrule
+    MiniF2F~\citep{minif2f2022}      & multi$^{e}$  & 488 (244/244) & n/a & n/r & \no \\
+    ProofNet~\citep{proofnet2023}    & Lean 3$^{f}$ & 371           & n/a & n/r & \no$^{g}$ \\
+    LeanDojo Benchmark~\citep{leandojo2023} & Lean & 98{,}734 & 2.21$^{h}$ & n/r & \yes \\
+    Herald~\citep{herald2025}        & Lean 4 & 44k$^{i}$ & \tbc & \tbc & \yes \\
+    ProofFlow bench~\citep{proofflow2025} & Lean 4 & 184 & \tbc & \tbc & \tbc \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{2pt}
+  \parbox{\textwidth}{\footnotesize
+  $^{a}$miniF2F-test problems solved by DeepSeek-Prover-V2-7B (pass@8, 162/244);
+  one verified proof per problem.
+  $^{b}$Reasoning steps in the step graph (median 5, range 1--54; 1{,}067
+  claims, 270 tactic blocks, 114 case splits; 7.32 used by the final proof).
+  The underlying \texttt{have} DAG has 8.45 nodes per proof at all depths
+  (median 5, range 1--61; 1.86 top-level).
+  $^{c}$Mean agreement of the informal step graph with the Lean proof, scored
+  1--5 by an LLM judge (Qwen3-30B-A3B-Instruct, a different model from the
+  translator); 34/162 items score $\geq 4$. At \texttt{have}-node granularity
+  the mean is 3.22 (80/162 $\geq 4$). Informal and Lean problem statements agree
+  on 153/162 items (94.4\%, LLM-checked).
+  $^{d}$Machine-generated, kernel-verified.
+  $^{e}$Lean, Isabelle, Metamath, HOL Light.
+  $^{f}$Lean 4 ports exist; ProofNet\# corrects 118 misformalized entries.
+  $^{g}$Natural-language proofs only.
+  $^{h}$Tactics per theorem (217{,}776/98{,}734), not \texttt{have} steps.
+  $^{i}$Aligned proof pairs (580k statement pairs).}
+\end{table*}
+
+
 
 % \begin{table}[H]
 %   \centering
@@ -376,7 +483,7 @@ with McNemar's test, and the per-problem outcome matrix is released.
 }
 % How to translate natural-language mathematical problems and solutions into faithful verifiable statement-and-proof pairs, enabling scalable formal verification?
 
-% Given a natural language theorem and proof pair $(NL_\text{theorem}, NL_\text{proof})$, we want to get the formal statement and proof $(FL_\text{theorem}, FL_\text{proof})$, which is verifiable by Lean and semantic faithful with the natural language pair. 
+% Given a natural language theorem and proof pair $(NL_\text{theorem}, NL_\text{proof})$, we want to get the formal statement and proof $(FL_\text{theorem}, FL_\text{proof})$, which is verifiable by Lean and semantic faithful with the natural language pair.
 
 % \paragraph{Hypothesis 1: Proof-aware autoformalization enables more verified solutions. (confirm motivation)} Autoformalizing both the theorem and the reasoning in a natural-language solution will produce a higher rate of correctly verified solutions than autoformalizing the theorem alone and asking a prover to reconstruct the proof independently.
 % \begin{table}[h]
@@ -417,7 +524,7 @@ with McNemar's test, and the per-problem outcome matrix is released.
 % \paragraph{Hypothesis 2: Step-level verifier feedback is more useful than final binary reward (inspire methods)}
 
 Verifier-guided reinforcement learning applied to individual formalized claims
-will improve end-to-end verification more than training from final compilation or proof-validity rewards alone. 
+will improve end-to-end verification more than training from final compilation or proof-validity rewards alone.
 
 We compare whole-proof supervised
 fine-tuning, structured supervised fine-tuning, final-reward reinforcement
@@ -521,8 +628,8 @@ stratified bootstrap 95\% confidence intervals.
 
 % \paragraph{Metrics} \begin{enumerate}
 %     \item Compilation success: a rollout counts as a success if it is valid Lean code that compiles without errors.
-%     \item Proof validity: a solution is mathematically correct, meaning it proves the same statement as problem, uses only the allowed axioms, and is accepted by the Lean kernel. 
-%     \item Semantic faithfulness: 
+%     \item Proof validity: a solution is mathematically correct, meaning it proves the same statement as problem, uses only the allowed axioms, and is accepted by the Lean kernel.
+%     \item Semantic faithfulness:
 % \end{enumerate}
 
 % A solution can compile successfully but still fail proof validity, for example if it contains a \texttt{sorry}, uses a disallowed axiom, or proves a different statement than intended. We report both metrics to separate basic code correctness from actual mathematical correctness.
@@ -666,7 +773,7 @@ runs \texttt{lake env lean} with the Comparator, an axiom whitelist checked by
 \texttt{native\_decide} and top-level \texttt{axiom} declarations.
 
 
-\bibliographystyle{abbrvnat}
+\bibliographystyle{ACM-Reference-Format}
 \bibliography{ref}
 
 \end{document}
